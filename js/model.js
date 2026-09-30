@@ -279,10 +279,6 @@ export function dispense(state, input, user) {
     const item = state.items.find((it) => it.id === l.itemId);
     if (!item) throw new Error(`Line ${n}: choose an item`);
     const qty = toQty(l.qty, `Line ${n}: quantity`);
-    if (item.controlled) {
-      req(input.prescriber, `${itemLabel(item)} is a controlled medicine – prescriber`);
-      req(input.rxNo, `${itemLabel(item)} is a controlled medicine – prescription number`);
-    }
     let alloc;
     if (l.batchId) {
       checkBatchOut(state, l.batchId, qty, date, balances);
@@ -305,12 +301,6 @@ export function dispense(state, input, user) {
   const record = stamp({
     id: dispenseId, serialNo, date, patientName,
     patientId: String(input.patientId || '').trim(),
-    age: String(input.age || '').trim(),
-    sex: String(input.sex || '').trim(),
-    address: String(input.address || '').trim(),
-    prescriber: String(input.prescriber || '').trim(),
-    rxNo: String(input.rxNo || '').trim(),
-    diagnosis: String(input.diagnosis || '').trim(),
     dispensedBy: user || '',
     lines,
     voided: false,
@@ -399,7 +389,7 @@ export function dispensingRegister(state, { from, to, q, controlledOnly } = {}) 
   return state.dispenses
     .filter((d) => (!from || d.date >= from) && (!to || d.date <= to))
     .filter((d) => !controlledOnly || d.lines.some((l) => items.get(l.itemId)?.controlled))
-    .filter((d) => !s || [d.serialNo, d.patientName, d.patientId, d.prescriber, d.rxNo]
+    .filter((d) => !s || [d.serialNo, d.patientName, d.patientId]
       .concat(d.lines.map((l) => itemLabel(items.get(l.itemId))))
       .some((v) => String(v || '').toLowerCase().includes(s)))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.serialNo < b.serialNo ? -1 : 1));

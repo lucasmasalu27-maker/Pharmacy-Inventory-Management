@@ -95,7 +95,7 @@ try {
   await pc.waitForSelector('h1:text("Goods Received Note")');
   check(await pc.isVisible('text=GRN-PC1-'), 'GRN created with device-prefixed number');
 
-  console.log('PC: controlled dispense rules, FEFO');
+  console.log('PC: dispense form, FEFO');
   await pc.goto(URL + '#/dispense');
   await pc.fill('[name=patientName]', 'Neema Juma');
   await pc.fill('[name=patientId]', 'OPD-1001');
@@ -103,10 +103,8 @@ try {
   await d1.locator('[name=item]').fill('Morphine 10mg/ml Injection');
   await d1.locator('[name=item]').dispatchEvent('change');
   await d1.locator('[name=qty]').fill('2');
-  await pc.click('text=Save to register');
-  check(await pc.isVisible('.alert.bad:has-text("controlled")'), 'controlled medicine blocked without prescriber');
-  await pc.fill('[name=prescriber]', 'Dr. Mushi');
-  await pc.fill('[name=rxNo]', 'RX-55');
+  const formFields = await pc.$$eval('#f input[name], #f select[name]', (els) => els.map((e) => e.name).filter((n) => !['item', 'qty', 'dosage', 'batchId'].includes(n)));
+  check(formFields.join() === 'date,patientName,patientId', `dispense form asks only date, patient name, ID/file no (got ${formFields.join()})`);
   await pc.click('#addLine');
   const d2 = pc.locator('[data-line]').nth(1);
   await d2.locator('[name=item]').fill('Amoxicillin 250mg Capsule');

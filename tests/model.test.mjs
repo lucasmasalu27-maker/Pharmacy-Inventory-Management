@@ -75,11 +75,13 @@ test('two lines of the same item cannot exceed stock together', () => {
   assert.throws(() => M.dispense(s, { date: '2026-02-01', patientName: 'X', lines: [{ itemId: para.id, qty: 6 }, { itemId: para.id, qty: 6 }] }), /Not enough/);
 });
 
-test('controlled medicine needs prescriber and Rx number', () => {
+test('register entry keeps only date, patient name and ID; controlled filter works', () => {
   const { s: s0, morph, msd } = setup();
   const s = receive(s0, msd, [{ itemId: morph.id, batchNo: 'M1', expiry: '2027-01-01', qty: 10 }]);
-  assert.throws(() => M.dispense(s, { date: '2026-02-01', patientName: 'X', lines: [{ itemId: morph.id, qty: 1 }] }), /prescriber/);
-  const r = M.dispense(s, { date: '2026-02-01', patientName: 'X', prescriber: 'Dr A', rxNo: 'RX9', lines: [{ itemId: morph.id, qty: 1 }] });
+  const r = M.dispense(s, { date: '2026-02-01', patientName: 'X', patientId: 'F-12', age: '40', prescriber: 'Dr A', lines: [{ itemId: morph.id, qty: 1 }] });
+  const d = r.dispenses[0];
+  assert.equal(d.patientId, 'F-12');
+  for (const k of ['age', 'sex', 'address', 'prescriber', 'rxNo', 'diagnosis']) assert.equal(k in d, false, k);
   assert.equal(r.txns.length, 1);
   const s1 = M.applyChanges(s, r);
   assert.equal(M.dispensingRegister(s1, { controlledOnly: true }).length, 1);
