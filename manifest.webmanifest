@@ -1,0 +1,16 @@
+{
+  "name": "Pharmacy Ledger & Dispensing Register",
+  "short_name": "Pharmacy Ledger",
+  "description": "Stock ledger and dispensing register – trace every item from MSD/vendor to patient.",
+  "start_url": "./index.html#/dashboard",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f6f8",
+  "theme_color": "#0b7a5f",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
