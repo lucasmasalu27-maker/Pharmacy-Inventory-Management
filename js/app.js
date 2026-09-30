@@ -74,7 +74,7 @@ function download(name, text, type = 'text/csv') {
 function route() {
   const h = location.hash.replace(/^#\/?/, '');
   const [path, qs] = h.split('?');
-  return { parts: (path || 'dashboard').split('/'), params: new URLSearchParams(qs || '') };
+  return { parts: (path || 'ledger').split('/'), params: new URLSearchParams(qs || '') };
 }
 
 function go(path, params) {
@@ -102,10 +102,26 @@ function printHeader(title, extra = '') {
 // ---------------------------------------------------------------- routing
 
 const VIEWS = {
-  dashboard: vDashboard, receive: vReceive, dispense: vDispense, movements: vMovements,
-  stocktake: vStockTake, ledger: vLedger, register: vRegister, trace: vTrace,
-  reports: vReports, items: vItems, settings: vSettings, doc: vDoc,
+  ledger: vLedger, receive: vReceive, movements: vMovements, items: vItems,
+  register: vRegister, dispense: vDispense, settings: vSettings, doc: vDoc,
 };
+
+// The app has two modules; each screen belongs to one of them.
+const MODULES = {
+  ledger: { title: 'Ledger', tabs: [['ledger', 'Stock card'], ['receive', 'Receive stock'], ['movements', 'Issue / adjust'], ['items', 'Items & suppliers']] },
+  register: { title: 'Dispensing register', tabs: [['register', 'Register'], ['dispense', 'New entry']] },
+};
+
+function moduleOf(page) {
+  if (page === 'doc') return route().parts[1] === 'grn' ? 'ledger' : 'register';
+  return Object.keys(MODULES).find((m) => MODULES[m].tabs.some(([k]) => k === page)) || '';
+}
+
+function moduleHeader(page) {
+  const m = MODULES[moduleOf(page)];
+  return `<h1>${esc(m.title)}</h1>
+    <div class="tabs no-print">${m.tabs.map(([k, l]) => `<a href="#/${k}" class="${k === page ? 'active' : ''}">${esc(l)}</a>`).join('')}</div>`;
+}
 
 function render() {
   const r = route();
@@ -113,10 +129,10 @@ function render() {
   document.getElementById('who').innerHTML = user()
     ? `Signed in: <b>${esc(user())}</b> · <a href="#/settings">change</a>` : '';
   for (const a of document.querySelectorAll('#nav a')) {
-    a.classList.toggle('active', a.getAttribute('href') === '#/' + r.parts[0]);
+    a.classList.toggle('active', a.getAttribute('href') === '#/' + (moduleOf(r.parts[0]) || r.parts[0]));
   }
   if (!S.settings.currentUser || !S.settings.facility) return vSetup();
-  const fn = VIEWS[r.parts[0]] || vDashboard;
+  const fn = VIEWS[r.parts[0]] || vLedger;
   try {
     fn(r);
   } catch (e) {
@@ -159,58 +175,9 @@ function vSetup() {
         { ...M.makeSupplier({ id: 'default-opening', name: 'Opening balance', kind: 'Other' }, user()), updatedAt: '2000-01-01T00:00:00.000Z' },
       ] });
     }
-    go('dashboard');
+    go('ledger');
     render();
   });
-}
-
-// -------------------------------------------------------------- dashboard
-
-function vDashboard() {
-  const st = M.stockStatus(S, { nearExpiryDays: 90 });
-  const t = M.today();
-  const todays = S.dispenses.filter((d) => d.date === t && !d.voided);
-  const out = st.filter((r) => r.stockOut);
-  const low = st.filter((r) => r.belowReorder && !r.stockOut);
-  const expired = M.expiryReport(S, { days: 0 }).filter((b) => b.daysLeft < 0);
-  const near = M.expiryReport(S, { days: 90 }).filter((b) => b.daysLeft >= 0);
-  const value = st.reduce((s, r) => s + r.value, 0);
-  const issues = M.integrityIssues(S);
-  const lastBackup = S.settings.lastBackup;
-  const backupOld = !lastBackup || (Date.now() - Date.parse(lastBackup)) > 7 * 86400000;
-
-  const list = (rows, fn) => rows.length ? `<ul>${rows.slice(0, 12).map(fn).join('')}</ul>${rows.length > 12 ? `<p class="hint">…and ${rows.length - 12} more</p>` : ''}` : '<p class="empty">None</p>';
-
-  view.innerHTML = `
-    <h1>Dashboard</h1>
-    <p class="sub">${esc(S.settings.facility)} · ${new Date().toDateString()}</p>
-    ${issues.map((i) => `<div class="alert bad">${esc(i)}</div>`).join('')}
-    ${S.items.length === 0 ? `<div class="alert ok">Start by adding your items under <a href="#/items">Items &amp; suppliers</a>, then record stock with <a href="#/receive">Receive stock</a>. For stock already on the shelf, receive it from the supplier “Opening balance”.</div>` : ''}
-    ${backupOld && S.txns.length ? `<div class="alert warn">No backup in the last 7 days. <a href="#/settings">Back up now</a>.</div>` : ''}
-    <div class="stats">
-      <div class="stat"><b>${S.items.filter((i) => i.active !== false).length}</b><span>Active items</span></div>
-      <div class="stat"><b>${money(value)}</b><span>Stock value</span></div>
-      <div class="stat"><b>${todays.length}</b><span>Prescriptions today</span></div>
-      <div class="stat ${out.length ? 'bad' : ''}"><b>${out.length}</b><span>Stock-outs</span></div>
-      <div class="stat ${low.length ? 'warn' : ''}"><b>${low.length}</b><span>At/below re-order level</span></div>
-      <div class="stat ${near.length ? 'warn' : ''}"><b>${near.length}</b><span>Batches expiring ≤ 90 days</span></div>
-      <div class="stat ${expired.length ? 'bad' : ''}"><b>${expired.length}</b><span>Expired batches on shelf</span></div>
-    </div>
-    <div class="actions no-print" style="margin:0 0 16px">
-      <a class="btn primary" href="#/dispense">Dispense</a>
-      <a class="btn" href="#/receive">Receive stock</a>
-      <a class="btn" href="#/trace">Trace a batch</a>
-    </div>
-    <div class="grid">
-      <div class="panel"><h2 style="margin-top:0">Stock-outs</h2>
-        ${list(out, (r) => `<li><a href="#/ledger?item=${r.item.id}">${esc(M.itemLabel(r.item))}</a></li>`)}</div>
-      <div class="panel"><h2 style="margin-top:0">Re-order now</h2>
-        ${list(low, (r) => `<li><a href="#/ledger?item=${r.item.id}">${esc(M.itemLabel(r.item))}</a> — ${fmt(r.usable)} ${esc(r.item.unit)} (level ${fmt(r.item.reorderLevel)})</li>`)}</div>
-      <div class="panel"><h2 style="margin-top:0">Expired – remove from shelf</h2>
-        ${list(expired, (b) => `<li><a href="#/trace?batch=${b.id}">${esc(M.itemLabel(b.item))} · ${esc(b.batchNo)}</a> — ${fmt(b.balance)} (exp ${esc(b.expiry)})</li>`)}</div>
-      <div class="panel"><h2 style="margin-top:0">Expiring within 90 days</h2>
-        ${list(near, (b) => `<li><a href="#/trace?batch=${b.id}">${esc(M.itemLabel(b.item))} · ${esc(b.batchNo)}</a> — ${fmt(b.balance)}, ${b.daysLeft} days</li>`)}</div>
-    </div>`;
 }
 
 // ---------------------------------------------------------- receive (GRN)
@@ -231,7 +198,7 @@ function vReceive() {
   const recent = [...S.receipts].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 15);
   const sm = suppliersById();
   view.innerHTML = `
-    <h1>Receive stock (GRN)</h1>
+    ${moduleHeader('receive')}
     <p class="sub">Record every delivery from MSD or a vendor. Each line creates a batch and a ledger entry.</p>
     ${itemDatalist()}
     <form class="panel" id="f" novalidate>
@@ -326,7 +293,7 @@ function dispenseLine() {
 
 function vDispense() {
   view.innerHTML = `
-    <h1>Dispense</h1>
+    ${moduleHeader('dispense')}
     <p class="sub">Each prescription becomes one entry in the Dispensing Register and is deducted from the ledger automatically.</p>
     ${itemDatalist()}
     <form class="panel" id="f" novalidate>
@@ -393,7 +360,7 @@ function vMovements({ params }) {
   const recent = S.txns.filter((t) => M.MANUAL_TYPES.includes(t.type) && t.party !== 'Stock count')
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 30);
   view.innerHTML = `
-    <h1>Issue, return &amp; adjust</h1>
+    ${moduleHeader('movements')}
     <p class="sub">Movements that are not patient dispensing: issues to wards/units, returns, expiry and damage write-offs, and corrections.</p>
     ${itemDatalist()}
     <form class="panel" id="f" novalidate>
@@ -442,57 +409,6 @@ function vMovements({ params }) {
   });
 }
 
-// ------------------------------------------------------------- stock take
-
-function vStockTake({ params }) {
-  const q = (params.get('q') || '').toLowerCase();
-  const bb = M.batchBalances(S);
-  const im = itemsById();
-  const rows = S.batches
-    .filter((b) => (bb.get(b.id) || 0) !== 0 && im.get(b.itemId)?.active !== false)
-    .map((b) => ({ ...b, item: im.get(b.itemId), balance: bb.get(b.id) }))
-    .filter((b) => !q || M.itemLabel(b.item).toLowerCase().includes(q) || (b.item?.category || '').toLowerCase().includes(q) || b.batchNo.toLowerCase().includes(q))
-    .sort((a, b) => M.itemLabel(a.item).localeCompare(M.itemLabel(b.item)) || (a.expiry < b.expiry ? -1 : 1));
-  view.innerHTML = `
-    <h1>Stock take</h1>
-    <p class="sub">Count what is on the shelf. Only differences are posted, as adjustments with the count recorded.</p>
-    ${printHeader('Physical stock count sheet')}
-    <form id="f" novalidate>
-      <div data-error></div>
-      <div class="toolbar">
-        <label>Filter (item, category, batch) <input name="q" value="${esc(q)}" id="q"></label>
-        <label>Count date <input type="date" name="date" value="${M.today()}"></label>
-        <label>Reference <input name="ref" placeholder="e.g. Quarterly count Q3"></label>
-        <label>Remarks <input name="remarks"></label>
-      </div>
-      ${table(['Item', 'Unit', 'Batch', 'Expiry', ['Ledger qty', 'num'], ['Counted', 'num']], rows.map((b) => `<tr>
-        <td>${esc(M.itemLabel(b.item))}</td><td>${esc(b.item?.unit)}</td><td>${esc(b.batchNo)}</td>
-        <td>${esc(b.expiry)} ${b.expiry < M.today() ? pill('expired', 'bad') : ''}</td><td class="num">${fmt(b.balance)}</td>
-        <td class="num" style="width:120px"><input type="number" min="0" step="any" inputmode="decimal" data-batch="${b.id}"></td></tr>`),
-        { empty: 'No stock on hand.' })}
-      <div class="actions">
-        <button class="btn primary">Post differences</button>
-        <button type="button" class="btn" onclick="window.print()">Print count sheet</button>
-      </div>
-    </form>`;
-  const f = view.querySelector('#f');
-  view.querySelector('#q').onchange = (e) => go('stocktake', { q: e.target.value });
-  view.querySelector('#q').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); go('stocktake', { q: e.target.value }); } };
-  f.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try {
-      const fd = new FormData(f);
-      const counts = [...f.querySelectorAll('[data-batch]')].map((i) => ({ batchId: i.dataset.batch, counted: i.value }));
-      const changes = M.stockTake(S, { date: fd.get('date'), ref: fd.get('ref'), remarks: fd.get('remarks'), counts }, user());
-      if (!changes.txns.length) { toast('No differences – nothing to post'); return; }
-      if (!confirm(`${changes.txns.length} batch(es) differ from the ledger. Post adjustments?`)) return;
-      await commit(changes);
-      toast(`${changes.txns.length} adjustment(s) posted`);
-      vStockTake({ params });
-    } catch (err) { showError(f, err); }
-  });
-}
-
 // ------------------------------------------------------------------ ledger
 
 function vLedger({ params }) {
@@ -515,7 +431,7 @@ function vLedger({ params }) {
           <dt>Balance now</dt><dd><b>${fmt(bs.reduce((s, b) => s + b.balance, 0))}</b> ${esc(item.unit)}</dd>
         </dl>
         <h2>Batches in stock</h2>
-        ${table(['Batch', 'Expiry', ['Balance', 'num'], ''], bs.map((b) => `<tr class="click" data-href="#/trace?batch=${b.id}">
+        ${table(['Batch', 'Expiry', ['Balance', 'num'], ''], bs.map((b) => `<tr>
           <td>${esc(b.batchNo)}</td><td>${esc(b.expiry)}</td><td class="num">${fmt(b.balance)}</td><td>${b.expired ? pill('expired', 'bad') : ''}</td></tr>`),
           { empty: 'No stock.' })}
       </div>
@@ -531,7 +447,7 @@ function vLedger({ params }) {
           foot: `<tfoot><tr><td colspan="6">Closing balance</td><td class="num">${fmt(card.rows.reduce((s, r) => s + r.qtyIn, 0))}</td><td class="num">${fmt(card.rows.reduce((s, r) => s + r.qtyOut, 0))}</td><td class="num">${fmt(card.closing)}</td><td colspan="2"></td></tr></tfoot>` })}`;
   }
   view.innerHTML = `
-    <h1>Ledger – stock card</h1>
+    ${moduleHeader('ledger')}
     <p class="sub">Every movement of an item, with running balance. Entries cannot be edited or deleted.</p>
     ${itemDatalist()}
     <form class="toolbar" id="f">
@@ -574,7 +490,7 @@ function vRegister({ params }) {
   const rows = M.dispensingRegister(S, { from, to, q, controlledOnly });
   const im = itemsById();
   view.innerHTML = `
-    <h1>Dispensing register</h1>
+    ${moduleHeader('register')}
     <p class="sub">Every prescription dispensed, in order. Voided entries stay visible, struck through.</p>
     ${printHeader(controlledOnly ? 'Controlled medicines register' : 'Dispensing register', `${esc(from)} to ${esc(to)}`)}
     <form class="toolbar" id="f">
@@ -615,201 +531,6 @@ function vRegister({ params }) {
   bindRowLinks();
 }
 
-// ------------------------------------------------------------------- trace
-
-function vTrace({ params }) {
-  const tab = params.get('tab') || 'batch';
-  const q = params.get('q') || '';
-  const batchId = params.get('batch');
-  const im = itemsById();
-  let body = '';
-  if (tab === 'patient') {
-    const rows = M.patientHistory(S, q);
-    body = q ? table(['Date', 'S/No', 'Patient', 'ID', 'Items', 'Prescriber'], rows.map((d) => `
-      <tr class="click ${d.voided ? 'void' : ''}" data-href="#/doc/dispense/${d.id}"><td>${esc(d.date)}</td><td>${esc(d.serialNo)}</td>
-      <td>${esc(d.patientName)}</td><td>${esc(d.patientId)}</td><td>${registerLines(d, im)}</td><td>${esc(d.prescriber)}</td></tr>`),
-      { empty: 'No patient found.' }) : '';
-  } else if (batchId) {
-    const t = M.traceBatch(S, batchId);
-    body = t ? traceChain(t) : '<div class="alert bad">Batch not found.</div>';
-  } else if (q) {
-    const bb = M.batchBalances(S);
-    const res = M.findBatches(S, q);
-    body = table(['Batch', 'Item', 'Expiry', 'Received', ['Balance', 'num']], res.map((b) => `
-      <tr class="click" data-href="#/trace?batch=${b.id}"><td><b>${esc(b.batchNo)}</b></td><td>${esc(M.itemLabel(b.item))}</td>
-      <td>${esc(b.expiry)}</td><td>${esc(b.receivedDate)}</td><td class="num">${fmt(bb.get(b.id) || 0)}</td></tr>`),
-      { empty: 'No batch matches.' });
-  }
-  view.innerHTML = `
-    <h1>Trace</h1>
-    <p class="sub">Follow a batch from the supplier to every patient or unit that received it — or see everything a patient received.</p>
-    <div class="tabs no-print">
-      <a href="#/trace?tab=batch" class="${tab === 'batch' ? 'active' : ''}">By batch / item</a>
-      <a href="#/trace?tab=patient" class="${tab === 'patient' ? 'active' : ''}">By patient</a>
-    </div>
-    <form class="toolbar" id="f">
-      <label style="flex:3 1 260px">${tab === 'patient' ? 'Patient name or ID' : 'Batch number or item name'} <input name="q" value="${esc(q)}" autocomplete="off"></label>
-      <button class="btn primary">Search</button>
-      ${batchId ? '<button type="button" class="btn" onclick="window.print()">Print</button>' : ''}
-    </form>
-    ${body}`;
-  view.querySelector('#f').addEventListener('submit', (e) => {
-    e.preventDefault();
-    go('trace', { tab, q: new FormData(e.target).get('q') });
-  });
-  const rc = view.querySelector('#recallCsv');
-  if (rc) {
-    const t = M.traceBatch(S, batchId);
-    rc.onclick = () => download(`recall-${t.batch.batchNo}.csv`, M.toCsv(t.recipients, [
-      { label: 'Date', get: 'date' }, { label: 'Type', get: (r) => typeLabel(r.type) }, { label: 'Ref', get: 'ref' },
-      { label: 'Patient / unit', get: 'name' }, { label: 'Patient ID', get: 'patientId' }, { label: 'Contact', get: 'contact' },
-      { label: 'Prescriber', get: 'prescriber' }, { label: 'Qty', get: 'qty' },
-    ]));
-  }
-  bindRowLinks();
-}
-
-function traceChain(t) {
-  const r = t.receipt;
-  const received = t.movements.filter((m) => m.type === 'RECEIPT').reduce((s, m) => s + m.qty, 0);
-  const out = t.recipients.reduce((s, x) => s + x.qty, 0);
-  return `
-    ${printHeader('Batch trace report', `— ${esc(M.itemLabel(t.item))} batch ${esc(t.batch.batchNo)}`)}
-    <div class="chain">
-      <div class="panel"><h2 style="margin-top:0">1 · Arrived</h2><dl class="kv">
-        <dt>Item</dt><dd><b>${esc(M.itemLabel(t.item))}</b></dd>
-        <dt>Batch</dt><dd><b>${esc(t.batch.batchNo)}</b></dd>
-        <dt>Expiry</dt><dd>${esc(t.batch.expiry)} ${t.batch.expiry < M.today() ? pill('expired', 'bad') : ''}</dd>
-        <dt>Supplier</dt><dd>${esc(t.supplier?.name || '—')}</dd>
-        <dt>GRN</dt><dd>${r ? `<a href="#/doc/grn/${r.id}">${esc(r.grnNo)}</a>` : '—'}</dd>
-        <dt>Date</dt><dd>${esc(t.batch.receivedDate)}</dd>
-        <dt>Invoice</dt><dd>${esc(r?.invoiceNo || '—')}</dd>
-        <dt>Delivery note</dt><dd>${esc(r?.deliveryNo || '—')}</dd>
-        <dt>Received by</dt><dd>${esc(r?.receivedBy || '—')}${r?.checkedBy ? ' · checked ' + esc(r.checkedBy) : ''}</dd>
-        <dt>Qty received</dt><dd>${fmt(received)} ${esc(t.item?.unit)}</dd>
-      </dl></div>
-      <div class="panel"><h2 style="margin-top:0">2 · Went out</h2><dl class="kv">
-        <dt>To patients/units</dt><dd>${fmt(out)} ${esc(t.item?.unit)} in ${t.recipients.length} transaction(s)</dd>
-        <dt>Other movements</dt><dd>${t.movements.filter((m) => !['RECEIPT', 'DISPENSE', 'ISSUE', 'REVERSAL'].includes(m.type)).length}</dd>
-      </dl></div>
-      <div class="panel"><h2 style="margin-top:0">3 · Left on shelf</h2><p style="font-size:28px;margin:0"><b>${fmt(t.balance)}</b> ${esc(t.item?.unit)}</p></div>
-    </div>
-    <h2>Recipients (recall list)</h2>
-    ${table(['Date', 'Type', 'Ref', 'Patient / unit', 'Patient ID', 'Contact', 'Prescriber', ['Qty', 'num']], t.recipients.map((x) => `<tr>
-      <td>${esc(x.date)}</td><td>${esc(typeLabel(x.type))}</td><td>${esc(x.ref)}</td><td>${esc(x.name)}</td>
-      <td>${esc(x.patientId)}</td><td>${esc(x.contact)}</td><td>${esc(x.prescriber)}</td><td class="num">${fmt(x.qty)}</td></tr>`),
-      { empty: 'Nobody has received this batch yet.' })}
-    <div class="actions no-print"><button class="btn" id="recallCsv">Export recall list (CSV)</button></div>
-    <h2>Full movement history</h2>
-    ${table(['Date', 'Type', 'Ref', 'Party', ['Qty', 'num'], ['Balance', 'num'], 'By', 'Remarks'], t.movements.map((m) => `<tr>
-      <td>${esc(m.date)}</td><td>${esc(typeLabel(m.type))}</td><td>${esc(m.ref)}</td><td>${esc(m.party)}</td>
-      <td class="num ${m.qty > 0 ? 'in' : 'out'}">${fmt(m.qty)}</td><td class="num">${fmt(m.balance)}</td><td>${esc(m.user)}</td><td>${esc(m.remarks)}</td></tr>`))}`;
-}
-
-// ----------------------------------------------------------------- reports
-
-function vReports({ params }) {
-  const tab = params.get('tab') || 'status';
-  const im = itemsById();
-  let body = '';
-  let csv = null;
-  const tabs = [['status', 'Stock status'], ['expiry', 'Expiry'], ['order', 'Order / requisition'], ['summary', 'Movement summary']];
-
-  if (tab === 'status') {
-    const months = Number(params.get('months')) || 3;
-    const rows = M.stockStatus(S, { months }).sort((a, b) => M.itemLabel(a.item).localeCompare(M.itemLabel(b.item)));
-    const total = rows.reduce((s, r) => s + r.value, 0);
-    body = `
-      <form class="toolbar" data-params><label>Average consumption over <select name="months">${[1, 3, 6, 12].map((m) => `<option value="${m}" ${m === months ? 'selected' : ''}>${m} month(s)</option>`).join('')}</select></label><button class="btn">Update</button></form>
-      ${table(['Item', 'Unit', ['On hand', 'num'], ['Expired', 'num'], ['≤90 days', 'num'], ['Value', 'num'], ['AMC', 'num'], ['Months of stock', 'num'], 'Next expiry', 'Status'],
-        rows.map((r) => `<tr class="click" data-href="#/ledger?item=${r.item.id}"><td>${esc(M.itemLabel(r.item))}</td><td>${esc(r.item.unit)}</td>
-        <td class="num">${fmt(r.onHand)}</td><td class="num">${r.expired ? fmt(r.expired) : ''}</td><td class="num">${r.nearExpiry ? fmt(r.nearExpiry) : ''}</td>
-        <td class="num">${money(r.value)}</td><td class="num">${fmt(r.amc)}</td><td class="num">${r.monthsOfStock === null ? '—' : fmt(r.monthsOfStock)}</td>
-        <td>${esc(r.nextExpiry)}</td><td>${r.stockOut ? pill('Stock-out', 'bad') : r.belowReorder ? pill('Re-order', 'warn') : pill('OK', 'ok')}</td></tr>`),
-        { foot: `<tfoot><tr><td colspan="5">Total value</td><td class="num">${money(total)}</td><td colspan="4"></td></tr></tfoot>` })}`;
-    csv = () => download(`stock-status-${M.today()}.csv`, M.toCsv(rows, [
-      { label: 'Code', get: (r) => r.item.code }, { label: 'Item', get: (r) => M.itemLabel(r.item) }, { label: 'Unit', get: (r) => r.item.unit },
-      { label: 'On hand', get: 'onHand' }, { label: 'Expired', get: 'expired' }, { label: 'Expiring <=90d', get: 'nearExpiry' },
-      { label: 'Value', get: (r) => r.value.toFixed(2) }, { label: 'AMC', get: (r) => r.amc.toFixed(2) },
-      { label: 'Months of stock', get: (r) => (r.monthsOfStock === null ? '' : r.monthsOfStock.toFixed(1)) },
-      { label: 'Next expiry', get: 'nextExpiry' }, { label: 'Re-order level', get: (r) => r.item.reorderLevel },
-    ]));
-  } else if (tab === 'expiry') {
-    const days = Number(params.get('days')) || 180;
-    const rows = M.expiryReport(S, { days });
-    body = `
-      <form class="toolbar" data-params><label>Expiring within <select name="days">${[30, 90, 180, 365].map((d) => `<option value="${d}" ${d === days ? 'selected' : ''}>${d} days</option>`).join('')}</select></label><button class="btn">Update</button></form>
-      ${table(['Item', 'Batch', 'Expiry', ['Days left', 'num'], ['Qty', 'num'], ['Value', 'num'], 'Supplier'], rows.map((b) => `
-        <tr class="click" data-href="#/trace?batch=${b.id}"><td>${esc(M.itemLabel(b.item))}</td><td>${esc(b.batchNo)}</td><td>${esc(b.expiry)}</td>
-        <td class="num">${b.daysLeft < 0 ? pill('expired', 'bad') : b.daysLeft}</td><td class="num">${fmt(b.balance)}</td><td class="num">${money(b.value)}</td>
-        <td>${esc(suppliersById().get(b.supplierId)?.name)}</td></tr>`),
-        { empty: 'Nothing expiring in this window.', foot: rows.length ? `<tfoot><tr><td colspan="5">Value at risk</td><td class="num">${money(rows.reduce((s, b) => s + b.value, 0))}</td><td></td></tr></tfoot>` : '' })}`;
-    csv = () => download(`expiry-${days}d-${M.today()}.csv`, M.toCsv(rows, [
-      { label: 'Item', get: (r) => M.itemLabel(r.item) }, { label: 'Batch', get: 'batchNo' }, { label: 'Expiry', get: 'expiry' },
-      { label: 'Days left', get: 'daysLeft' }, { label: 'Qty', get: 'balance' }, { label: 'Value', get: (r) => r.value.toFixed(2) },
-    ]));
-  } else if (tab === 'order') {
-    const cover = Number(params.get('cover')) || 3;
-    const rows = M.stockStatus(S, { months: 3, targetMonths: cover })
-      .filter((r) => r.suggestedOrder > 0 || r.belowReorder || r.stockOut)
-      .sort((a, b) => M.itemLabel(a.item).localeCompare(M.itemLabel(b.item)));
-    body = `
-      <form class="toolbar" data-params><label>Order to cover <select name="cover">${[1, 2, 3, 4, 6].map((m) => `<option value="${m}" ${m === cover ? 'selected' : ''}>${m} month(s)</option>`).join('')}</select></label><button class="btn">Update</button></form>
-      <p class="hint">Suggested quantity = average monthly consumption (last 3 months) × months to cover − usable stock. Adjust before sending to MSD.</p>
-      ${table(['Code', 'Item', 'Unit', ['Usable stock', 'num'], ['AMC', 'num'], ['Months of stock', 'num'], ['Suggested order', 'num']], rows.map((r) => `<tr>
-        <td>${esc(r.item.code)}</td><td>${esc(M.itemLabel(r.item))}</td><td>${esc(r.item.unit)}</td><td class="num">${fmt(r.usable)}</td>
-        <td class="num">${fmt(r.amc)}</td><td class="num">${r.monthsOfStock === null ? '—' : fmt(r.monthsOfStock)}</td><td class="num"><b>${fmt(r.suggestedOrder)}</b></td></tr>`),
-        { empty: 'Nothing needs ordering.' })}
-      <div class="signs print-only"><div>Prepared by (Pharmacist in charge)</div><div>Approved by</div><div>Date</div></div>`;
-    csv = () => download(`requisition-${M.today()}.csv`, M.toCsv(rows, [
-      { label: 'Code', get: (r) => r.item.code }, { label: 'Item', get: (r) => M.itemLabel(r.item) }, { label: 'Unit', get: (r) => r.item.unit },
-      { label: 'Usable stock', get: 'usable' }, { label: 'AMC', get: (r) => r.amc.toFixed(2) }, { label: 'Suggested order', get: 'suggestedOrder' },
-    ]));
-  } else {
-    const from = params.get('from') || monthStart();
-    const to = params.get('to') || M.today();
-    const sums = new Map();
-    for (const t of S.txns) {
-      if (t.date < from || t.date > to) continue;
-      const row = sums.get(t.itemId) || { RECEIPT: 0, DISPENSE: 0, ISSUE: 0, RETURN_IN: 0, RETURN_OUT: 0, LOSS: 0, ADJ: 0 };
-      if (t.type === 'EXPIRED' || t.type === 'DAMAGED') row.LOSS += -t.qty;
-      else if (t.type === 'ADJUST_IN' || t.type === 'ADJUST_OUT') row.ADJ += t.qty;
-      else if (t.type === 'REVERSAL') row.DISPENSE -= t.qty; // voided dispenses net out
-      else if (t.type in row) row[t.type] += Math.abs(t.qty);
-      sums.set(t.itemId, row);
-    }
-    const rows = [...sums.entries()].map(([id, r]) => ({ item: im.get(id), ...r, opening: M.stockCard(S, id, { from }).opening }))
-      .map((r) => ({ ...r, closing: r.opening + r.RECEIPT + r.RETURN_IN - r.DISPENSE - r.ISSUE - r.RETURN_OUT - r.LOSS + r.ADJ }))
-      .sort((a, b) => M.itemLabel(a.item).localeCompare(M.itemLabel(b.item)));
-    body = `
-      <form class="toolbar" data-params><label>From <input type="date" name="from" value="${esc(from)}"></label><label>To <input type="date" name="to" value="${esc(to)}"></label><button class="btn">Update</button></form>
-      ${printHeader('Movement summary', `${esc(from)} to ${esc(to)}`)}
-      ${table(['Item', ['Opening', 'num'], ['Received', 'num'], ['Returned in', 'num'], ['Dispensed', 'num'], ['Issued', 'num'], ['Returned out', 'num'], ['Expired/lost', 'num'], ['Adjust ±', 'num'], ['Closing', 'num']],
-        rows.map((r) => `<tr class="click" data-href="#/ledger?item=${r.item?.id}&from=${from}&to=${to}"><td>${esc(M.itemLabel(r.item))}</td><td class="num">${fmt(r.opening)}</td>
-        <td class="num">${fmt(r.RECEIPT)}</td><td class="num">${fmt(r.RETURN_IN)}</td><td class="num">${fmt(r.DISPENSE)}</td><td class="num">${fmt(r.ISSUE)}</td>
-        <td class="num">${fmt(r.RETURN_OUT)}</td><td class="num">${fmt(r.LOSS)}</td><td class="num">${fmt(r.ADJ)}</td><td class="num"><b>${fmt(r.closing)}</b></td></tr>`),
-        { empty: 'No movements in this period.' })}`;
-    csv = () => download(`movement-summary-${from}-to-${to}.csv`, M.toCsv(rows, [
-      { label: 'Item', get: (r) => M.itemLabel(r.item) }, { label: 'Opening', get: 'opening' }, { label: 'Received', get: 'RECEIPT' },
-      { label: 'Returned in', get: 'RETURN_IN' }, { label: 'Dispensed', get: 'DISPENSE' }, { label: 'Issued', get: 'ISSUE' },
-      { label: 'Returned out', get: 'RETURN_OUT' }, { label: 'Expired/lost', get: 'LOSS' }, { label: 'Adjustments', get: 'ADJ' }, { label: 'Closing', get: 'closing' },
-    ]));
-  }
-
-  const title = tabs.find((t) => t[0] === tab)[1];
-  view.innerHTML = `
-    <h1>Reports</h1>
-    <p class="sub">Tap a row to open its stock card or trace.</p>
-    <div class="tabs no-print">${tabs.map(([k, l]) => `<a href="#/reports?tab=${k}" class="${k === tab ? 'active' : ''}">${l}</a>`).join('')}</div>
-    ${tab !== 'summary' ? printHeader(title) : ''}
-    ${body}
-    <div class="actions"><button class="btn" id="csv">Export CSV</button><button class="btn" onclick="window.print()">Print</button></div>`;
-  const pf = view.querySelector('[data-params]');
-  if (pf) pf.addEventListener('submit', (e) => { e.preventDefault(); go('reports', { tab, ...Object.fromEntries(new FormData(pf).entries()) }); });
-  view.querySelector('#csv').onclick = csv;
-  bindRowLinks();
-}
-
 // ---------------------------------------------------- items & suppliers
 
 function vItems({ params }) {
@@ -822,7 +543,7 @@ function vItems({ params }) {
   const e = editing || { unit: '', active: true };
   const cats = [...new Set(S.items.map((i) => i.category).filter(Boolean))];
   view.innerHTML = `
-    <h1>Items &amp; suppliers</h1>
+    ${moduleHeader('items')}
     <p class="sub">Master list of medicines and supplies, and where they come from.</p>
     <form class="panel" id="fi" novalidate>
       <h2 style="margin-top:0">${editing ? 'Edit item' : 'Add item'}</h2>
@@ -846,9 +567,7 @@ function vItems({ params }) {
       <div class="actions">
         <button class="btn primary">${editing ? 'Save changes' : 'Add item'}</button>
         ${editing ? '<a class="btn" href="#/items">Cancel</a>' : ''}
-        <label class="btn" style="margin-left:auto">Import items from CSV<input type="file" accept=".csv,text/csv" id="csvIn" hidden></label>
-      </div>
-      <p class="hint">CSV columns: name, strength, form, unit, code, category, reorderLevel, controlled (yes/no). First row is the header.</p>
+</div>
     </form>
     <form class="toolbar" id="fs"><label>Search items <input name="q" value="${esc(q)}"></label><button class="btn">Search</button></form>
     ${table(['Code', 'Item', 'Unit', 'Category', ['Re-order', 'num'], ['Balance', 'num'], ''], items.map((i) => `
@@ -886,25 +605,6 @@ function vItems({ params }) {
     } catch (err) { showError(fi, err); }
   });
   view.querySelector('#fs').addEventListener('submit', (ev) => { ev.preventDefault(); go('items', { q: new FormData(ev.target).get('q') }); });
-  view.querySelector('#csvIn').addEventListener('change', async (ev) => {
-    const file = ev.target.files[0];
-    if (!file) return;
-    try {
-      const recs = parseCsv(await file.text());
-      const existing = new Set(S.items.map((i) => M.itemLabel(i).toLowerCase()));
-      const add = [];
-      for (const r of recs) {
-        if (!r.name) continue;
-        const it = M.makeItem({ ...r, controlled: /^(y|yes|true|1)$/i.test(r.controlled || '') }, user());
-        if (existing.has(M.itemLabel(it).toLowerCase())) continue;
-        existing.add(M.itemLabel(it).toLowerCase());
-        add.push(it);
-      }
-      await commit({ items: add });
-      toast(`Imported ${add.length} item(s)`);
-      vItems({ params: new URLSearchParams() });
-    } catch (err) { showError(fi, err); }
-  });
   const fsup = view.querySelector('#fsup');
   fsup.addEventListener('submit', async (ev) => {
     ev.preventDefault();
@@ -917,29 +617,6 @@ function vItems({ params }) {
     } catch (err) { showError(fsup, err); }
   });
   bindRowLinks();
-}
-
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let cell = '';
-  let quoted = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (quoted) {
-      if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') quoted = false; else cell += c;
-    } else if (c === '"') quoted = true;
-    else if (c === ',') { row.push(cell); cell = ''; } else if (c === '\n' || c === '\r') {
-      if (c === '\r' && text[i + 1] === '\n') i++;
-      row.push(cell); rows.push(row); row = []; cell = '';
-    } else cell += c;
-  }
-  if (cell || row.length) { row.push(cell); rows.push(row); }
-  const [head, ...body] = rows.filter((r) => r.some((c) => c.trim()));
-  if (!head) return [];
-  const keys = head.map((h) => h.trim().replace(/\s+/g, '').replace(/^reorder(level)?$/i, 'reorderLevel').toLowerCase());
-  const norm = { reorderlevel: 'reorderLevel' };
-  return body.map((r) => Object.fromEntries(keys.map((k, i) => [norm[k] || k, (r[i] || '').trim()])));
 }
 
 // --------------------------------------------------------------- documents
@@ -966,12 +643,12 @@ function vDoc({ parts }) {
         <h2>Items</h2>
         ${table(['#', 'Item', 'Unit', 'Batch', 'Expiry', ['Qty', 'num'], ['Unit cost', 'num'], ['Value', 'num']], r.lines.map((l, i) => `<tr>
           <td>${i + 1}</td><td>${esc(M.itemLabel(im.get(l.itemId)))}</td><td>${esc(im.get(l.itemId)?.unit)}</td>
-          <td><a href="#/trace?batch=${l.batchId}">${esc(l.batchNo)}</a></td><td>${esc(l.expiry)}</td>
+          <td>${esc(l.batchNo)}</td><td>${esc(l.expiry)}</td>
           <td class="num">${fmt(l.qty)}</td><td class="num">${money(l.unitCost)}</td><td class="num">${money(l.qty * (l.unitCost || 0))}</td></tr>`),
           { foot: `<tfoot><tr><td colspan="7">Total</td><td class="num">${money(total)}</td></tr></tfoot>` })}
         <div class="signs"><div>Received by: ${esc(r.receivedBy)}</div><div>Checked by: ${esc(r.checkedBy)}</div><div>Supplier's representative</div></div>
       </div>
-      <div class="actions"><button class="btn primary" onclick="window.print()">Print GRN</button><a class="btn" href="#/receive">New receipt</a></div>`;
+      <div class="actions"><button class="btn primary" onclick="window.print()">Print GRN</button><a class="btn" href="#/receive">New receipt</a><a class="btn" href="#/ledger">Back to ledger</a></div>`;
     return;
   }
   const d = S.dispenses.find((x) => x.id === id);
@@ -990,13 +667,13 @@ function vDoc({ parts }) {
       <h2>Items</h2>
       ${table(['Item', ['Qty', 'num'], 'Directions', 'Batch (expiry)'], d.lines.map((l) => `<tr>
         <td>${esc(M.itemLabel(im.get(l.itemId)))}</td><td class="num">${fmt(l.qty)} ${esc(im.get(l.itemId)?.unit)}</td><td>${esc(l.dosage)}</td>
-        <td>${l.allocations.map((a) => `<a href="#/trace?batch=${a.batchId}">${esc(a.batchNo)}</a> (${esc(a.expiry)}) × ${fmt(a.qty)}`).join('<br>')}</td></tr>`))}
+        <td>${l.allocations.map((a) => `${esc(a.batchNo)} (${esc(a.expiry)}) × ${fmt(a.qty)}`).join('<br>')}</td></tr>`))}
       <div class="signs"><div>Dispensed by: ${esc(d.dispensedBy)}</div><div>Received by (patient / carer)</div></div>
     </div>
     <div class="actions">
       <button class="btn primary" onclick="window.print()">Print</button>
       <a class="btn" href="#/dispense">Next patient</a>
-      <a class="btn" href="#/register">Register</a>
+      <a class="btn" href="#/register">Back to register</a>
       ${d.voided ? '' : '<button class="btn danger" id="void">Void entry…</button>'}
     </div>`;
   const vb = view.querySelector('#void');
@@ -1092,7 +769,7 @@ function vSettings() {
     if (prompt('Type ERASE to delete all data on this device') !== 'ERASE') return;
     await DB.wipeAll();
     S = M.emptyState();
-    location.hash = '#/dashboard';
+    location.hash = '#/ledger';
     render();
   };
   renderServerPanel();
@@ -1153,7 +830,7 @@ async function syncNow() {
     await setSetting('lastPushAt', started);
     await setSetting('lastServerSync', M.nowIso());
     // Show other devices' entries on read-only screens; never wipe a half-filled form.
-    const readOnly = ['dashboard', 'ledger', 'register', 'trace', 'reports'].includes(route().parts[0]);
+    const readOnly = ['ledger', 'register'].includes(route().parts[0]);
     if (readOnly && M.COLLECTIONS.some((c) => changes[c]?.length)) render();
     return changes;
   } finally { syncing = false; }

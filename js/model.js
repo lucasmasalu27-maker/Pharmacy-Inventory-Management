@@ -64,10 +64,6 @@ export function addDays(dateStr, days) {
   return d.toISOString().slice(0, 10);
 }
 
-function daysBetween(a, b) {
-  return Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
-}
-
 function isDate(s) {
   return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
 }
@@ -368,30 +364,6 @@ export function postMovement(state, input, user) {
   return { txns: [txn] };
 }
 
-// Physical stock count. For every batch counted, posts an adjustment for the
-// difference between the ledger balance and what is on the shelf.
-export function stockTake(state, input, user) {
-  const date = req(input.date, 'Date');
-  const balances = batchBalances(state);
-  const ref = String(input.ref || `COUNT ${date}`).trim();
-  const txns = [];
-  for (const c of input.counts || []) {
-    if (c.counted === '' || c.counted === null || c.counted === undefined) continue;
-    const counted = Number(c.counted);
-    if (!Number.isFinite(counted) || counted < 0) throw new Error('Counted quantities must be zero or more');
-    const batch = state.batches.find((b) => b.id === c.batchId);
-    if (!batch) continue;
-    const diff = counted - (balances.get(batch.id) || 0);
-    if (diff === 0) continue;
-    txns.push(stamp({
-      id: newId(), date, itemId: batch.itemId, batchId: batch.id,
-      type: diff > 0 ? 'ADJUST_IN' : 'ADJUST_OUT', qty: diff, ref, docId: '', party: 'Stock count',
-      user: user || '', remarks: `Physical count ${counted}, ledger ${balances.get(batch.id) || 0}${input.remarks ? ' – ' + input.remarks : ''}`,
-    }, user));
-  }
-  return { txns };
-}
-
 // ------------------------------------------------------------------ ledger
 
 // Stock card (bin card) for one item: opening balance, every movement with
@@ -419,51 +391,6 @@ export function stockCard(state, itemId, { from, to } = {}) {
   return { opening, rows, closing: bal };
 }
 
-// ------------------------------------------------------------------- trace
-
-// Full chain of custody for one batch: where it came from, every movement,
-// and every patient/unit that received it (for recalls).
-export function traceBatch(state, batchId) {
-  const batch = state.batches.find((b) => b.id === batchId);
-  if (!batch) return null;
-  const item = state.items.find((i) => i.id === batch.itemId);
-  const supplier = state.suppliers.find((s) => s.id === batch.supplierId);
-  const receipt = state.receipts.find((r) => r.id === batch.receiptId);
-  const movements = state.txns.filter((t) => t.batchId === batchId).sort(txnOrder);
-  let bal = 0;
-  const rows = movements.map((t) => ({ ...t, balance: (bal += t.qty) }));
-  const dispById = byId(state.dispenses);
-  const reversed = new Set(movements.filter((t) => t.reversalOf).map((t) => t.reversalOf));
-  const recipients = movements
-    .filter((t) => (t.type === 'DISPENSE' || t.type === 'ISSUE') && !reversed.has(t.id))
-    .map((t) => {
-      const d = t.docId ? dispById.get(t.docId) : null;
-      return {
-        date: t.date, type: t.type, qty: -t.qty, ref: t.ref, name: t.party,
-        patientId: d ? d.patientId : '', contact: d ? d.address : '', prescriber: d ? d.prescriber : '',
-      };
-    });
-  return { batch, item, supplier, receipt, movements: rows, balance: bal, recipients };
-}
-
-export function findBatches(state, query) {
-  const q = String(query || '').trim().toUpperCase();
-  if (!q) return [];
-  const items = byId(state.items);
-  return state.batches
-    .filter((b) => b.batchNo.includes(q) || itemLabel(items.get(b.itemId)).toUpperCase().includes(q))
-    .map((b) => ({ ...b, item: items.get(b.itemId) }));
-}
-
-// Everything a patient has received (search by name or patient ID).
-export function patientHistory(state, query) {
-  const q = String(query || '').trim().toLowerCase();
-  if (!q) return [];
-  return state.dispenses
-    .filter((d) => d.patientName.toLowerCase().includes(q) || (d.patientId || '').toLowerCase().includes(q))
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
-}
-
 // ----------------------------------------------------------------- reports
 
 export function dispensingRegister(state, { from, to, q, controlledOnly } = {}) {
@@ -476,75 +403,6 @@ export function dispensingRegister(state, { from, to, q, controlledOnly } = {}) 
       .concat(d.lines.map((l) => itemLabel(items.get(l.itemId))))
       .some((v) => String(v || '').toLowerCase().includes(s)))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.serialNo < b.serialNo ? -1 : 1));
-}
-
-// Average monthly consumption (dispensed + issued, net of reversals) over the
-// last `months` months, per item.
-export function consumption(state, { months = 3, asOf = today() } = {}) {
-  const from = addDays(asOf, -Math.round(months * 30.44));
-  const m = new Map();
-  for (const t of state.txns) {
-    if (t.date < from || t.date > asOf) continue;
-    if (t.type === 'DISPENSE' || t.type === 'ISSUE') m.set(t.itemId, (m.get(t.itemId) || 0) - t.qty);
-    else if (t.type === 'REVERSAL') m.set(t.itemId, (m.get(t.itemId) || 0) - t.qty);
-  }
-  const out = new Map();
-  for (const [k, v] of m) out.set(k, v / months);
-  return out;
-}
-
-// One row per item: stock on hand, value, AMC, months of stock, alerts and a
-// suggested order quantity (to cover `targetMonths` of consumption).
-export function stockStatus(state, { asOf = today(), months = 3, targetMonths = 3, nearExpiryDays = 90 } = {}) {
-  const bb = batchBalances(state);
-  const amc = consumption(state, { months, asOf });
-  return state.items.filter((i) => i.active !== false).map((item) => {
-    const batches = availableBatches(state, item.id, asOf, bb);
-    const onHand = batches.reduce((s, b) => s + b.balance, 0);
-    const expired = batches.filter((b) => b.expired).reduce((s, b) => s + b.balance, 0);
-    const nearExpiry = batches.filter((b) => !b.expired && daysBetween(asOf, b.expiry) <= nearExpiryDays)
-      .reduce((s, b) => s + b.balance, 0);
-    const usable = onHand - expired;
-    const value = batches.reduce((s, b) => s + b.balance * (b.unitCost || 0), 0);
-    const a = amc.get(item.id) || 0;
-    const mos = a > 0 ? usable / a : null;
-    const suggested = Math.max(0, Math.ceil(a * targetMonths - usable));
-    return {
-      item, onHand, usable, expired, nearExpiry, value, amc: a, monthsOfStock: mos,
-      belowReorder: item.reorderLevel > 0 && usable <= item.reorderLevel,
-      stockOut: usable <= 0,
-      suggestedOrder: suggested,
-      nextExpiry: batches.find((b) => !b.expired)?.expiry || '',
-    };
-  });
-}
-
-export function expiryReport(state, { asOf = today(), days = 180 } = {}) {
-  const bb = batchBalances(state);
-  const items = byId(state.items);
-  const limit = addDays(asOf, days);
-  return state.batches
-    .filter((b) => (bb.get(b.id) || 0) > 0 && b.expiry <= limit)
-    .map((b) => ({
-      ...b, item: items.get(b.itemId), balance: bb.get(b.id),
-      daysLeft: daysBetween(asOf, b.expiry), value: bb.get(b.id) * (b.unitCost || 0),
-    }))
-    .sort((a, b) => (a.expiry < b.expiry ? -1 : 1));
-}
-
-// Batches whose ledger balance went negative – usually two devices dispensing
-// the same stock before syncing, or a missing receipt.
-export function integrityIssues(state) {
-  const issues = [];
-  const bb = batchBalances(state);
-  const items = byId(state.items);
-  for (const b of state.batches) {
-    if ((bb.get(b.id) || 0) < 0) issues.push(`${itemLabel(items.get(b.itemId))} batch ${b.batchNo}: negative balance ${bb.get(b.id)}`);
-  }
-  const batchIds = new Set(state.batches.map((b) => b.id));
-  const orphan = state.txns.filter((t) => !batchIds.has(t.batchId)).length;
-  if (orphan) issues.push(`${orphan} ledger entries refer to a batch that is missing on this device – sync again`);
-  return issues;
 }
 
 // -------------------------------------------------------------------- sync

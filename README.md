@@ -9,7 +9,7 @@ It runs on **Android** (phone/tablet) and **Linux desktop**, works **offline**, 
 
 | | **Ledger** (stock control) | **Dispensing Register** (patients) |
 |---|---|---|
-| Records | Goods received (GRN), issues to wards/units, returns, expiry & damage write-offs, stock-take adjustments | Every prescription: serial no, date, patient, ID, age/sex, prescriber, Rx no, diagnosis, items, dosage, batch, dispenser |
+| Records | Goods received (GRN), issues to wards/units, returns, expiry & damage write-offs, corrections | Every prescription: serial no, date, patient, ID, age/sex, prescriber, Rx no, diagnosis, items, dosage, batch, dispenser |
 | View | Stock card (bin card) per item with running balance | Register by date range; controlled-medicines register |
 | Rules | Append-only: entries are never edited or deleted, only reversed | Voided entries stay visible, struck through, with reason and who voided them |
 
@@ -20,17 +20,21 @@ MSD / vendor ──GRN──▶ Batch (no., expiry, supplier, invoice) ──▶
                                                                   └──────▶ Issue to ward / write-off / return
 ```
 
-## Features
+## What's in the app
 
-- **Receive stock (GRN):** supplier, invoice, delivery note, order no, checked-by witness; batch no, expiry, quantity and unit cost per line. Rejects expired stock, and rejects a batch number that already exists with a different expiry. Prints a GRN.
-- **Dispense:** FEFO allocation across batches, never from expired stock, never beyond what is on hand. Controlled medicines require prescriber and prescription number. Prints a dispensing slip.
-- **Issue / adjust:** issue to wards/units, returns in and out, expired/damaged write-offs, and corrections (a reason is required).
-- **Stock take:** a printable count sheet; only the differences are posted, with the count recorded.
-- **Trace:** search a batch and see its supplier, GRN, invoice, date and receiver, every movement, the balance left, and the **recall list** of every patient or unit that received it (exports to CSV). You can also search a patient to see everything they received.
-- **Reports:** stock status (on hand, value, average monthly consumption, months of stock), expiry (30/90/180/365 days), order/requisition suggestions for MSD, and a movement summary (opening → received → dispensed/issued/lost → closing). Every report exports to CSV and prints.
-- **Dashboard:** stock-outs, items at re-order level, expired batches still on the shelf, batches expiring within 90 days, and a reminder when there has been no backup in 7 days.
-- **Accountability:** every entry records the signed-in user. You switch user in Settings at shift handover.
-- Item list import from CSV. Light and dark themes. Print-friendly pages.
+The app has just two sections.
+
+**Ledger**
+- **Stock card:** every movement of an item with a running balance. Each row shows the date, type, GRN or register number, supplier/patient/ward, batch, expiry, quantity in and out, balance and user. Prints, and exports to CSV.
+- **Receive stock:** a goods received note (GRN) for each delivery from MSD or a vendor, with invoice, delivery note and checked-by witness. Each line holds batch no, expiry, quantity and unit cost. Expired stock is refused. Prints a GRN.
+- **Issue / adjust:** issues to wards/units, returns in and out, expired/damaged write-offs, and corrections (a reason is required).
+- **Items & suppliers:** the list of medicines and where they come from.
+
+**Dispensing register**
+- **New entry:** patient, ID, age/sex, prescriber, Rx no, diagnosis, then each item with its dosage. Batches are chosen first-expiry-first-out, never from expired stock and never beyond what is on hand. Controlled medicines require a prescriber and prescription number. Prints a dispensing slip.
+- **Register:** all entries by date range, with search and a controlled-medicines filter. Prints, and exports to CSV. An entry can be voided with a reason; it stays visible, struck through, and its stock returns to the ledger.
+
+**Settings & backup:** facility name, current user, backup/restore, and office server sync.
 
 ## Getting it running
 
@@ -56,9 +60,9 @@ Choose one:
 ### First use
 
 1. Enter the facility name, your name, and a **device code** (e.g. `PC1`, `TAB1`). The code goes into GRN and register numbers (`GRN-PC1-2026-00001`, `DR-TAB1-2026-00001`), so numbers never clash between devices.
-2. Add items under **Items & suppliers**, one at a time or by CSV import with the columns `name, strength, form, unit, code, category, reorderLevel, controlled`.
-3. Record the stock already on your shelves as a **Receive stock** from the supplier **“Opening balance”**, with the real batch numbers and expiry dates.
-4. From then on: record every delivery under **Receive**, every prescription under **Dispense**, and everything else under **Issue / adjust**.
+2. Add items under **Ledger → Items & suppliers**.
+3. Record the stock already on your shelves under **Ledger → Receive stock** from the supplier **“Opening balance”**, with the real batch numbers and expiry dates.
+4. From then on: record every delivery under **Ledger → Receive stock**, every prescription under **Dispensing register → New entry**, and everything else under **Ledger → Issue / adjust**.
 
 ## Keeping data safe and in sync
 
@@ -66,7 +70,7 @@ Choose one:
 - **Office server sync:** a device opened from the server's address syncs automatically after every save and every 3 minutes. If the server is off, the device keeps working and catches up later.
 - **Backup files:** use *Settings → Export backup* to save a `.json` file, and *Import / merge backup* on another device. Importing **merges**: records are matched by ID, so nothing is duplicated or lost. You can use this to move data between the phone and the PC by USB, email or WhatsApp.
 - Back up the server database by copying `~/.local/share/pharmacy-ledger/server.db` while the server is stopped, or export a backup from any synced device.
-- If two devices dispense the same last units before they sync, the dashboard flags the batch's **negative balance** so you can investigate.
+- If two devices dispense the same last units before they sync, the stock card will show a **negative balance** so you can investigate.
 
 ## Development
 

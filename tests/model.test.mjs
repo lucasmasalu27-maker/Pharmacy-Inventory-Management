@@ -95,9 +95,7 @@ test('void restores stock via reversal and keeps the register row', () => {
   assert.equal(M.itemBalances(s).get(para.id), 10);
   assert.equal(s.dispenses[0].voided, true);
   assert.throws(() => M.voidDispense(s, id, 'again'), /already void/);
-  const tr = M.traceBatch(s, s.batches[0].id);
-  assert.equal(tr.recipients.length, 0, 'voided dispense is not a recipient');
-  assert.equal(tr.movements.length, 3);
+  assert.equal(M.stockCard(s, para.id).rows.map((r) => r.type).join(), 'RECEIPT,DISPENSE,REVERSAL');
 });
 
 test('movements: issue, write-off expired, adjustments', () => {
@@ -113,17 +111,14 @@ test('movements: issue, write-off expired, adjustments', () => {
   assert.throws(() => M.postMovement(s, { type: 'DAMAGED', date: '2026-04-01', batchId: b.id, qty: 1, remarks: 'x' }), /only 0/);
 });
 
-test('stock take posts only the differences', () => {
+test('dispensing register filters by date and search text', () => {
   const { s: s0, para, msd } = setup();
-  const s = receive(s0, msd, [
-    { itemId: para.id, batchNo: 'A', expiry: '2027-01-01', qty: 100 },
-    { itemId: para.id, batchNo: 'B', expiry: '2027-02-01', qty: 50 },
-  ]);
-  const [a, b] = s.batches;
-  const r = M.stockTake(s, { date: '2026-03-31', counts: [{ batchId: a.id, counted: 97 }, { batchId: b.id, counted: 50 }] });
-  assert.equal(r.txns.length, 1);
-  assert.equal(r.txns[0].type, 'ADJUST_OUT');
-  assert.equal(r.txns[0].qty, -3);
+  let s = receive(s0, msd, [{ itemId: para.id, batchNo: 'A', expiry: '2027-01-01', qty: 100 }]);
+  s = M.applyChanges(s, M.dispense(s, { date: '2026-02-05', patientName: 'Asha', patientId: 'P77', lines: [{ itemId: para.id, qty: 10 }] }));
+  s = M.applyChanges(s, M.dispense(s, { date: '2026-03-05', patientName: 'Juma', lines: [{ itemId: para.id, qty: 5 }] }));
+  assert.equal(M.dispensingRegister(s, { from: '2026-03-01' }).length, 1);
+  assert.equal(M.dispensingRegister(s, { q: 'p77' })[0].patientName, 'Asha');
+  assert.equal(M.dispensingRegister(s, { q: 'paracetamol' }).length, 2);
 });
 
 test('stock card opening balance and date range', () => {
@@ -135,33 +130,6 @@ test('stock card opening balance and date range', () => {
   assert.equal(card.opening, 100);
   assert.equal(card.rows.length, 1);
   assert.equal(card.closing, 90);
-});
-
-test('trace batch lists supplier, GRN and patients', () => {
-  const { s: s0, para, msd } = setup();
-  let s = receive(s0, msd, [{ itemId: para.id, batchNo: 'A', expiry: '2027-01-01', qty: 100 }]);
-  s = M.applyChanges(s, M.dispense(s, { date: '2026-02-05', patientName: 'Asha', patientId: 'P77', lines: [{ itemId: para.id, qty: 10 }] }));
-  const tr = M.traceBatch(s, s.batches[0].id);
-  assert.equal(tr.supplier.name, 'MSD');
-  assert.equal(tr.receipt.invoiceNo, 'INV1');
-  assert.deepEqual(tr.recipients.map((r) => [r.name, r.patientId, r.qty]), [['Asha', 'P77', 10]]);
-  assert.equal(tr.balance, 90);
-  assert.equal(M.findBatches(s, 'a').length, 1);
-  assert.equal(M.patientHistory(s, 'p77').length, 1);
-});
-
-test('stock status, AMC and suggested order', () => {
-  const { s: s0, para, msd } = setup();
-  let s = receive(s0, msd, [{ itemId: para.id, batchNo: 'A', expiry: '2026-05-01', qty: 400, unitCost: 2 }], '2026-01-01');
-  s = M.applyChanges(s, M.dispense(s, { date: '2026-03-01', patientName: 'X', lines: [{ itemId: para.id, qty: 300 }] }));
-  const [row] = M.stockStatus(s, { asOf: '2026-03-31', months: 3, targetMonths: 3 });
-  assert.equal(row.onHand, 100);
-  assert.equal(row.value, 200);
-  assert.equal(row.amc, 100);
-  assert.equal(row.belowReorder, true);
-  assert.equal(row.nearExpiry, 100);
-  assert.equal(row.suggestedOrder, 200);
-  assert.equal(M.expiryReport(s, { asOf: '2026-03-31', days: 60 }).length, 1);
 });
 
 test('merge unions ledger entries and keeps newest master data', () => {
@@ -176,7 +144,6 @@ test('merge unions ledger entries and keeps newest master data', () => {
   assert.equal(merged.items.find((i) => i.id === para.id).name, 'Paracetamol (Panadol)');
   const again = M.mergeCollection(merged.txns, devB.txns);
   assert.equal(again.changed.length, 0, 'merge is idempotent');
-  assert.deepEqual(M.integrityIssues(merged), []);
 });
 
 test('edits made in the same millisecond still win a merge', () => {
