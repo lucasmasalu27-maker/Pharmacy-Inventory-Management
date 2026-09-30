@@ -78,12 +78,6 @@ h2 { font-size: 17px; margin: 22px 0 8px; }
 }
 
 .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
-.stats { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom: 16px; }
-.stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
-.stat b { display: block; font-size: 24px; }
-.stat span { color: var(--muted); font-size: 13px; }
-.stat.warn b { color: var(--warn); }
-.stat.bad b { color: var(--bad); }
 
 label { display: block; font-size: 13px; color: var(--muted); }
 label > input, label > select, label > textarea { margin-top: 4px; }
@@ -152,7 +146,6 @@ tfoot td { font-weight: 600; background: var(--bg); }
 .tabs a { padding: 8px 12px; text-decoration: none; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; }
 .tabs a.active { color: var(--brand); border-color: var(--brand); font-weight: 600; }
 
-.chain { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 14px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; }

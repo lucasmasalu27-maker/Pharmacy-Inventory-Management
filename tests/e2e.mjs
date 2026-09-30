@@ -40,7 +40,7 @@ async function setup(page, who, code) {
   await page.fill('[name=currentUser]', who);
   await page.fill('[name=deviceCode]', code);
   await page.click('text=Start');
-  await page.waitForSelector('h1:text("Dashboard")');
+  await page.waitForSelector('h1:text("Ledger")');
   await page.goto(URL + '#/settings');
   await page.fill('#fk [name=key]', 'k1');
   await page.click('#fk button');
@@ -144,7 +144,7 @@ try {
   await phone.click('#syncBtn');
   await phone.waitForSelector('#syncOut .alert');
 
-  console.log('PC: ledger, trace, reports reflect both devices');
+  console.log('PC: ledger and register reflect both devices');
   await pc.goto(URL + '#/settings');
   await pc.click('#syncBtn');
   await pc.waitForSelector('#syncOut .alert');
@@ -159,18 +159,12 @@ try {
   check(/155\s+65\s+90/.test(foot.replace(/,/g, '')), `stock card totals in 155 / out 65 / balance 90 (got "${foot.trim()}")`);
   const status = await (await fetch(URL + 'api/status', { headers: { 'X-Sync-Key': 'k1' } })).json();
   check(status.records.suppliers === 2, 'default suppliers not duplicated across devices');
-  await pc.goto(URL + '#/trace?q=AM01');
-  await pc.click('tbody tr:has-text("AM01")');
-  await pc.waitForSelector('text=Recipients (recall list)');
-  const tr = await pc.locator('main').innerText();
-  check(tr.includes('MSD-INV-77') && tr.includes('Neema Juma') && !tr.match(/Juma Ally.*Dispensed/), 'trace shows invoice and patient; voided dispense excluded');
+  const card = await pc.locator('main').innerText();
+  check(card.includes('GRN-PC1-') && card.includes('Neema Juma') && card.includes('AM01'), 'stock card shows GRN, patient and batch for tracing');
+  const navText = await pc.locator('#nav').innerText();
+  check(!/Dashboard|Trace|Reports|Stock take/.test(navText), 'only Ledger and Dispensing register in the menu');
   await pc.goto(URL + '#/register?controlled=1&from=2000-01-01');
   check(await pc.locator('tbody tr').count() === 1, 'controlled-only register filter');
-  for (const t of ['status', 'expiry', 'order', 'summary']) {
-    await pc.goto(URL + `#/reports?tab=${t}`);
-    await pc.waitForSelector('#csv');
-  }
-  check(true, 'all report tabs render');
   await pc.goto(URL + '#/movements');
   await pc.selectOption('#f [name=type]', 'ISSUE');
   await pc.fill('#f [name=item]', 'Amoxicillin 250mg Capsule');
@@ -180,13 +174,8 @@ try {
   await pc.click('text=Post to ledger');
   await pc.waitForSelector('td:text("Ward 2")');
   check(true, 'issue to ward posted');
-  await pc.goto(URL + '#/stocktake');
-  await pc.locator('[data-batch]').first().fill('0');
-  await pc.click('text=Post differences');
-  await pc.waitForSelector('#toast.show:has-text("adjustment")');
-  check(true, 'stock take posts adjustment');
-  await pc.goto(URL + '#/dashboard');
-  await pc.screenshot({ path: join(process.env.SHOTS || data, 'pc-dashboard.png'), fullPage: true });
+  await pc.goto(URL + '#/ledger');
+  await pc.screenshot({ path: join(process.env.SHOTS || data, 'pc-ledger.png'), fullPage: true });
   await phone.goto(URL + '#/dispense');
   await phone.screenshot({ path: join(process.env.SHOTS || data, 'phone-dispense.png'), fullPage: true });
 
