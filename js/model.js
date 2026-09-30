@@ -265,7 +265,7 @@ export function receiveStock(state, input, user) {
 export function dispense(state, input, user) {
   const date = req(input.date, 'Date');
   if (!isDate(date)) throw new Error('Date must be YYYY-MM-DD');
-  const patientName = req(input.patientName, 'Patient name');
+  const patientId = req(input.patientId, 'Patient ID / file no');
   if (!input.lines || !input.lines.length) throw new Error('Add at least one item');
 
   const balances = batchBalances(state);
@@ -279,10 +279,6 @@ export function dispense(state, input, user) {
     const item = state.items.find((it) => it.id === l.itemId);
     if (!item) throw new Error(`Line ${n}: choose an item`);
     const qty = toQty(l.qty, `Line ${n}: quantity`);
-    if (item.controlled) {
-      req(input.prescriber, `${itemLabel(item)} is a controlled medicine – prescriber`);
-      req(input.rxNo, `${itemLabel(item)} is a controlled medicine – prescription number`);
-    }
     let alloc;
     if (l.batchId) {
       checkBatchOut(state, l.batchId, qty, date, balances);
@@ -295,7 +291,7 @@ export function dispense(state, input, user) {
       const b = state.batches.find((x) => x.id === a.batchId);
       txns.push(stamp({
         id: newId(), date, itemId: item.id, batchId: a.batchId, type: 'DISPENSE', qty: -a.qty,
-        ref: serialNo, docId: dispenseId, party: patientName, user: user || '', remarks: '',
+        ref: serialNo, docId: dispenseId, party: patientId, user: user || '', remarks: '',
       }, user));
       return { batchId: a.batchId, batchNo: b.batchNo, expiry: b.expiry, qty: a.qty };
     });
@@ -303,14 +299,7 @@ export function dispense(state, input, user) {
   });
 
   const record = stamp({
-    id: dispenseId, serialNo, date, patientName,
-    patientId: String(input.patientId || '').trim(),
-    age: String(input.age || '').trim(),
-    sex: String(input.sex || '').trim(),
-    address: String(input.address || '').trim(),
-    prescriber: String(input.prescriber || '').trim(),
-    rxNo: String(input.rxNo || '').trim(),
-    diagnosis: String(input.diagnosis || '').trim(),
+    id: dispenseId, serialNo, date, patientId,
     dispensedBy: user || '',
     lines,
     voided: false,
@@ -331,7 +320,7 @@ export function voidDispense(state, dispenseId, reason, user) {
     .filter((t) => t.docId === dispenseId && t.type === 'DISPENSE')
     .map((t) => stamp({
       id: newId(), date, itemId: t.itemId, batchId: t.batchId, type: 'REVERSAL', qty: -t.qty,
-      ref: d.serialNo, docId: dispenseId, reversalOf: t.id, party: d.patientName, user: user || '',
+      ref: d.serialNo, docId: dispenseId, reversalOf: t.id, party: d.patientId || d.patientName, user: user || '',
       remarks: `Void: ${reason}`,
     }, user));
   const updated = { ...d, voided: true, voidReason: String(reason).trim(), voidedBy: user || '', voidedAt: nowIso(), updatedAt: laterThan(d.updatedAt) };
@@ -399,7 +388,7 @@ export function dispensingRegister(state, { from, to, q, controlledOnly } = {}) 
   return state.dispenses
     .filter((d) => (!from || d.date >= from) && (!to || d.date <= to))
     .filter((d) => !controlledOnly || d.lines.some((l) => items.get(l.itemId)?.controlled))
-    .filter((d) => !s || [d.serialNo, d.patientName, d.patientId, d.prescriber, d.rxNo]
+    .filter((d) => !s || [d.serialNo, d.patientName, d.patientId]
       .concat(d.lines.map((l) => itemLabel(items.get(l.itemId))))
       .some((v) => String(v || '').toLowerCase().includes(s)))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.serialNo < b.serialNo ? -1 : 1));

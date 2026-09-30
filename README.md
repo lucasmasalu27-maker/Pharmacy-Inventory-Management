@@ -9,7 +9,7 @@ It runs on **Android** (phone/tablet) and **Linux desktop**, works **offline**, 
 
 | | **Ledger** (stock control) | **Dispensing Register** (patients) |
 |---|---|---|
-| Records | Goods received (GRN), issues to wards/units, returns, expiry & damage write-offs, corrections | Every prescription: serial no, date, patient, ID, age/sex, prescriber, Rx no, diagnosis, items, dosage, batch, dispenser |
+| Records | Goods received (GRN), issues to wards/units, returns, expiry & damage write-offs, corrections | Every prescription: serial no, date, patient ID / file no, items, dosage, batch, dispenser |
 | View | Stock card (bin card) per item with running balance | Register by date range; controlled-medicines register |
 | Rules | Append-only: entries are never edited or deleted, only reversed | Voided entries stay visible, struck through, with reason and who voided them |
 
@@ -31,7 +31,7 @@ The app has just two sections.
 - **Items & suppliers:** the list of medicines and where they come from.
 
 **Dispensing register**
-- **New entry:** patient, ID, age/sex, prescriber, Rx no, diagnosis, then each item with its dosage. Batches are chosen first-expiry-first-out, never from expired stock and never beyond what is on hand. Controlled medicines require a prescriber and prescription number. Prints a dispensing slip.
+- **New entry:** date and patient ID / file no, then each item with its dosage. Batches are chosen first-expiry-first-out, never from expired stock and never beyond what is on hand. Prints a dispensing slip.
 - **Register:** all entries by date range, with search and a controlled-medicines filter. Prints, and exports to CSV. An entry can be voided with a reason; it stays visible, struck through, and its stock returns to the ledger.
 
 **Settings & backup:** facility name, current user, backup/restore, and office server sync.

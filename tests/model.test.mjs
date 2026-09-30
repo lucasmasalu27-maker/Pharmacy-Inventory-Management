@@ -48,7 +48,7 @@ test('dispense uses FEFO, splits batches and posts to ledger', () => {
     { itemId: para.id, batchNo: 'LATE', expiry: '2027-01-01', qty: 100 },
     { itemId: para.id, batchNo: 'EARLY', expiry: '2026-06-01', qty: 30 },
   ]);
-  const r = M.dispense(s, { date: '2026-02-01', patientName: 'John Doe', patientId: 'P1', lines: [{ itemId: para.id, qty: 50, dosage: '2 tds x5' }] }, 'PIC');
+  const r = M.dispense(s, { date: '2026-02-01', patientId: 'P1', lines: [{ itemId: para.id, qty: 50, dosage: '2 tds x5' }] }, 'PIC');
   const d = r.dispenses[0];
   assert.equal(d.serialNo, 'DR-D1-2026-00001');
   assert.deepEqual(d.lines[0].allocations.map((a) => [a.batchNo, a.qty]), [['EARLY', 30], ['LATE', 20]]);
@@ -63,23 +63,26 @@ test('dispense uses FEFO, splits batches and posts to ledger', () => {
 test('dispense refuses expired stock and over-dispensing', () => {
   const { s: s0, para, msd } = setup();
   const s = receive(s0, msd, [{ itemId: para.id, batchNo: 'E', expiry: '2026-03-01', qty: 100 }]);
-  assert.throws(() => M.dispense(s, { date: '2026-04-01', patientName: 'X', lines: [{ itemId: para.id, qty: 1 }] }), /Not enough usable stock/);
-  assert.throws(() => M.dispense(s, { date: '2026-02-01', patientName: 'X', lines: [{ itemId: para.id, qty: 101 }] }), /Not enough/);
+  assert.throws(() => M.dispense(s, { date: '2026-04-01', patientId: 'X', lines: [{ itemId: para.id, qty: 1 }] }), /Not enough usable stock/);
+  assert.throws(() => M.dispense(s, { date: '2026-02-01', patientId: 'X', lines: [{ itemId: para.id, qty: 101 }] }), /Not enough/);
   const batch = s.batches[0];
-  assert.throws(() => M.dispense(s, { date: '2026-04-01', patientName: 'X', lines: [{ itemId: para.id, qty: 1, batchId: batch.id }] }), /expired/);
+  assert.throws(() => M.dispense(s, { date: '2026-04-01', patientId: 'X', lines: [{ itemId: para.id, qty: 1, batchId: batch.id }] }), /expired/);
 });
 
 test('two lines of the same item cannot exceed stock together', () => {
   const { s: s0, para, msd } = setup();
   const s = receive(s0, msd, [{ itemId: para.id, batchNo: 'A', expiry: '2027-01-01', qty: 10 }]);
-  assert.throws(() => M.dispense(s, { date: '2026-02-01', patientName: 'X', lines: [{ itemId: para.id, qty: 6 }, { itemId: para.id, qty: 6 }] }), /Not enough/);
+  assert.throws(() => M.dispense(s, { date: '2026-02-01', patientId: 'X', lines: [{ itemId: para.id, qty: 6 }, { itemId: para.id, qty: 6 }] }), /Not enough/);
 });
 
-test('controlled medicine needs prescriber and Rx number', () => {
+test('register entry keeps only date and patient ID; controlled filter works', () => {
   const { s: s0, morph, msd } = setup();
   const s = receive(s0, msd, [{ itemId: morph.id, batchNo: 'M1', expiry: '2027-01-01', qty: 10 }]);
-  assert.throws(() => M.dispense(s, { date: '2026-02-01', patientName: 'X', lines: [{ itemId: morph.id, qty: 1 }] }), /prescriber/);
-  const r = M.dispense(s, { date: '2026-02-01', patientName: 'X', prescriber: 'Dr A', rxNo: 'RX9', lines: [{ itemId: morph.id, qty: 1 }] });
+  assert.throws(() => M.dispense(s, { date: '2026-02-01', lines: [{ itemId: morph.id, qty: 1 }] }), /Patient ID/);
+  const r = M.dispense(s, { date: '2026-02-01', patientName: 'X', patientId: 'F-12', age: '40', prescriber: 'Dr A', lines: [{ itemId: morph.id, qty: 1 }] });
+  const d = r.dispenses[0];
+  assert.equal(d.patientId, 'F-12');
+  for (const k of ['patientName', 'age', 'sex', 'address', 'prescriber', 'rxNo', 'diagnosis']) assert.equal(k in d, false, k);
   assert.equal(r.txns.length, 1);
   const s1 = M.applyChanges(s, r);
   assert.equal(M.dispensingRegister(s1, { controlledOnly: true }).length, 1);
@@ -88,7 +91,7 @@ test('controlled medicine needs prescriber and Rx number', () => {
 test('void restores stock via reversal and keeps the register row', () => {
   const { s: s0, para, msd } = setup();
   let s = receive(s0, msd, [{ itemId: para.id, batchNo: 'A', expiry: '2027-01-01', qty: 10 }]);
-  s = M.applyChanges(s, M.dispense(s, { date: '2026-02-01', patientName: 'X', lines: [{ itemId: para.id, qty: 4 }] }));
+  s = M.applyChanges(s, M.dispense(s, { date: '2026-02-01', patientId: 'X', lines: [{ itemId: para.id, qty: 4 }] }));
   const id = s.dispenses[0].id;
   assert.throws(() => M.voidDispense(s, id, ''), /Reason/);
   s = M.applyChanges(s, M.voidDispense(s, id, 'wrong patient', 'PIC'));
@@ -114,18 +117,18 @@ test('movements: issue, write-off expired, adjustments', () => {
 test('dispensing register filters by date and search text', () => {
   const { s: s0, para, msd } = setup();
   let s = receive(s0, msd, [{ itemId: para.id, batchNo: 'A', expiry: '2027-01-01', qty: 100 }]);
-  s = M.applyChanges(s, M.dispense(s, { date: '2026-02-05', patientName: 'Asha', patientId: 'P77', lines: [{ itemId: para.id, qty: 10 }] }));
-  s = M.applyChanges(s, M.dispense(s, { date: '2026-03-05', patientName: 'Juma', lines: [{ itemId: para.id, qty: 5 }] }));
+  s = M.applyChanges(s, M.dispense(s, { date: '2026-02-05', patientId: 'P77', lines: [{ itemId: para.id, qty: 10 }] }));
+  s = M.applyChanges(s, M.dispense(s, { date: '2026-03-05', patientId: 'Juma', lines: [{ itemId: para.id, qty: 5 }] }));
   assert.equal(M.dispensingRegister(s, { from: '2026-03-01' }).length, 1);
-  assert.equal(M.dispensingRegister(s, { q: 'p77' })[0].patientName, 'Asha');
+  assert.equal(M.dispensingRegister(s, { q: 'p77' })[0].patientId, 'P77');
   assert.equal(M.dispensingRegister(s, { q: 'paracetamol' }).length, 2);
 });
 
 test('stock card opening balance and date range', () => {
   const { s: s0, para, msd } = setup();
   let s = receive(s0, msd, [{ itemId: para.id, batchNo: 'A', expiry: '2027-01-01', qty: 100 }], '2026-01-10');
-  s = M.applyChanges(s, M.dispense(s, { date: '2026-02-05', patientName: 'X', lines: [{ itemId: para.id, qty: 10 }] }));
-  s = M.applyChanges(s, M.dispense(s, { date: '2026-03-05', patientName: 'Y', lines: [{ itemId: para.id, qty: 5 }] }));
+  s = M.applyChanges(s, M.dispense(s, { date: '2026-02-05', patientId: 'X', lines: [{ itemId: para.id, qty: 10 }] }));
+  s = M.applyChanges(s, M.dispense(s, { date: '2026-03-05', patientId: 'Y', lines: [{ itemId: para.id, qty: 5 }] }));
   const card = M.stockCard(s, para.id, { from: '2026-02-01', to: '2026-02-28' });
   assert.equal(card.opening, 100);
   assert.equal(card.rows.length, 1);
@@ -135,8 +138,8 @@ test('stock card opening balance and date range', () => {
 test('merge unions ledger entries and keeps newest master data', () => {
   const { s: base, para, msd } = setup();
   const devA = receive(base, msd, [{ itemId: para.id, batchNo: 'A', expiry: '2027-01-01', qty: 100 }]);
-  const devB = M.applyChanges(devA, M.dispense(devA, { date: '2026-02-01', patientName: 'X', lines: [{ itemId: para.id, qty: 5 }] }));
-  const devA2 = M.applyChanges(devA, M.dispense(devA, { date: '2026-02-01', patientName: 'Y', lines: [{ itemId: para.id, qty: 7 }] }));
+  const devB = M.applyChanges(devA, M.dispense(devA, { date: '2026-02-01', patientId: 'X', lines: [{ itemId: para.id, qty: 5 }] }));
+  const devA2 = M.applyChanges(devA, M.dispense(devA, { date: '2026-02-01', patientId: 'Y', lines: [{ itemId: para.id, qty: 7 }] }));
   const renamed = { ...para, name: 'Paracetamol (Panadol)', updatedAt: '2999-01-01T00:00:00Z' };
   const merged = M.applyChanges(devA2, { txns: devB.txns, dispenses: devB.dispenses, items: [renamed] });
   assert.equal(M.itemBalances(merged).get(para.id), 88);

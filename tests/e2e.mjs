@@ -95,18 +95,15 @@ try {
   await pc.waitForSelector('h1:text("Goods Received Note")');
   check(await pc.isVisible('text=GRN-PC1-'), 'GRN created with device-prefixed number');
 
-  console.log('PC: controlled dispense rules, FEFO');
+  console.log('PC: dispense form, FEFO');
   await pc.goto(URL + '#/dispense');
-  await pc.fill('[name=patientName]', 'Neema Juma');
   await pc.fill('[name=patientId]', 'OPD-1001');
   const d1 = pc.locator('[data-line]').nth(0);
   await d1.locator('[name=item]').fill('Morphine 10mg/ml Injection');
   await d1.locator('[name=item]').dispatchEvent('change');
   await d1.locator('[name=qty]').fill('2');
-  await pc.click('text=Save to register');
-  check(await pc.isVisible('.alert.bad:has-text("controlled")'), 'controlled medicine blocked without prescriber');
-  await pc.fill('[name=prescriber]', 'Dr. Mushi');
-  await pc.fill('[name=rxNo]', 'RX-55');
+  const formFields = await pc.$$eval('#f input[name], #f select[name]', (els) => els.map((e) => e.name).filter((n) => !['item', 'qty', 'dosage', 'batchId'].includes(n)));
+  check(formFields.join() === 'date,patientId', `dispense form asks only date and patient ID/file no (got ${formFields.join()})`);
   await pc.click('#addLine');
   const d2 = pc.locator('[data-line]').nth(1);
   await d2.locator('[name=item]').fill('Amoxicillin 250mg Capsule');
@@ -124,10 +121,10 @@ try {
   const phone = await device('phone', { ...devices['Pixel 7'] });
   await setup(phone, 'Tech. Baraka', 'TAB1');
   await phone.goto(URL + '#/register');
-  await phone.waitForSelector('td:text("Neema Juma")');
+  await phone.waitForSelector('td:text("OPD-1001")');
   check(true, 'phone sees PC dispensing after sync');
   await phone.goto(URL + '#/dispense');
-  await phone.fill('[name=patientName]', 'Juma Ally');
+  await phone.fill('[name=patientId]', 'OPD-2002');
   const p1 = phone.locator('[data-line]').nth(0);
   await p1.locator('[name=item]').fill('Amoxicillin 250mg Capsule');
   await p1.locator('[name=item]').dispatchEvent('change');
@@ -160,7 +157,7 @@ try {
   const status = await (await fetch(URL + 'api/status', { headers: { 'X-Sync-Key': 'k1' } })).json();
   check(status.records.suppliers === 2, 'default suppliers not duplicated across devices');
   const card = await pc.locator('main').innerText();
-  check(card.includes('GRN-PC1-') && card.includes('Neema Juma') && card.includes('AM01'), 'stock card shows GRN, patient and batch for tracing');
+  check(card.includes('GRN-PC1-') && card.includes('OPD-1001') && card.includes('AM01'), 'stock card shows GRN, patient and batch for tracing');
   const navText = await pc.locator('#nav').innerText();
   check(!/Dashboard|Trace|Reports|Stock take/.test(navText), 'only Ledger and Dispensing register in the menu');
   await pc.goto(URL + '#/register?controlled=1&from=2000-01-01');
