@@ -265,7 +265,7 @@ export function receiveStock(state, input, user) {
 export function dispense(state, input, user) {
   const date = req(input.date, 'Date');
   if (!isDate(date)) throw new Error('Date must be YYYY-MM-DD');
-  const patientName = req(input.patientName, 'Patient name');
+  const patientId = req(input.patientId, 'Patient ID / file no');
   if (!input.lines || !input.lines.length) throw new Error('Add at least one item');
 
   const balances = batchBalances(state);
@@ -291,7 +291,7 @@ export function dispense(state, input, user) {
       const b = state.batches.find((x) => x.id === a.batchId);
       txns.push(stamp({
         id: newId(), date, itemId: item.id, batchId: a.batchId, type: 'DISPENSE', qty: -a.qty,
-        ref: serialNo, docId: dispenseId, party: patientName, user: user || '', remarks: '',
+        ref: serialNo, docId: dispenseId, party: patientId, user: user || '', remarks: '',
       }, user));
       return { batchId: a.batchId, batchNo: b.batchNo, expiry: b.expiry, qty: a.qty };
     });
@@ -299,8 +299,7 @@ export function dispense(state, input, user) {
   });
 
   const record = stamp({
-    id: dispenseId, serialNo, date, patientName,
-    patientId: String(input.patientId || '').trim(),
+    id: dispenseId, serialNo, date, patientId,
     dispensedBy: user || '',
     lines,
     voided: false,
@@ -321,7 +320,7 @@ export function voidDispense(state, dispenseId, reason, user) {
     .filter((t) => t.docId === dispenseId && t.type === 'DISPENSE')
     .map((t) => stamp({
       id: newId(), date, itemId: t.itemId, batchId: t.batchId, type: 'REVERSAL', qty: -t.qty,
-      ref: d.serialNo, docId: dispenseId, reversalOf: t.id, party: d.patientName, user: user || '',
+      ref: d.serialNo, docId: dispenseId, reversalOf: t.id, party: d.patientId || d.patientName, user: user || '',
       remarks: `Void: ${reason}`,
     }, user));
   const updated = { ...d, voided: true, voidReason: String(reason).trim(), voidedBy: user || '', voidedAt: nowIso(), updatedAt: laterThan(d.updatedAt) };

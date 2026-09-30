@@ -300,8 +300,7 @@ function vDispense() {
       <div data-error></div>
       <div class="grid">
         <label>Date <input type="date" name="date" value="${M.today()}"></label>
-        <label>Patient name * <input name="patientName" autocomplete="off"></label>
-        <label>Patient ID / file no <input name="patientId" autocomplete="off"></label>
+        <label>Patient ID / file no * <input name="patientId" autocomplete="off"></label>
       </div>
       <h2>Items</h2>
       <div class="lines" id="lines">${dispenseLine()}</div>
@@ -325,7 +324,7 @@ function vDispense() {
     e.preventDefault();
     try {
       const fd = new FormData(f);
-      const input = Object.fromEntries(['date', 'patientName', 'patientId'].map((k) => [k, fd.get(k)]));
+      const input = Object.fromEntries(['date', 'patientId'].map((k) => [k, fd.get(k)]));
       input.lines = [...lines.querySelectorAll('[data-line]')].filter((el) => el.querySelector('[name=item]').value.trim()).map((el, i) => {
         const v = (n) => el.querySelector(`[name=${n}]`).value;
         const item = resolveItem(v('item'));
@@ -490,15 +489,15 @@ function vRegister({ params }) {
     <form class="toolbar" id="f">
       <label>From <input type="date" name="from" value="${esc(from)}"></label>
       <label>To <input type="date" name="to" value="${esc(to)}"></label>
-      <label style="flex:2 1 200px">Search (patient, ID, drug, S/No) <input name="q" value="${esc(q)}"></label>
+      <label style="flex:2 1 200px">Search (patient ID, drug, S/No) <input name="q" value="${esc(q)}"></label>
       <label class="check"><input type="checkbox" name="controlled" value="1" ${controlledOnly ? 'checked' : ''}> Controlled only</label>
       <button class="btn primary">Show</button>
       <button type="button" class="btn" id="csv">CSV</button>
       <button type="button" class="btn" onclick="window.print()">Print</button>
     </form>
-    ${table(['S/No', 'Date', 'Patient', 'ID / File no', 'Items dispensed', 'By', ''], rows.map((d) => `
+    ${table(['S/No', 'Date', 'Patient ID / File no', 'Items dispensed', 'By', ''], rows.map((d) => `
       <tr class="click ${d.voided ? 'void' : ''}" data-href="#/doc/dispense/${d.id}">
-        <td>${esc(d.serialNo)}</td><td>${esc(d.date)}</td><td>${esc(d.patientName)}</td><td>${esc(d.patientId)}</td>
+        <td>${esc(d.serialNo)}</td><td>${esc(d.date)}</td><td>${esc(d.patientId || d.patientName)}</td>
         <td>${registerLines(d, im)}</td>
         <td>${esc(d.dispensedBy)}</td><td>${d.voided ? pill('VOID', 'bad') : ''}</td></tr>`),
       { empty: 'No entries for this period.' })}
@@ -512,7 +511,7 @@ function vRegister({ params }) {
     const flat = rows.flatMap((d) => d.lines.flatMap((l) => l.allocations.map((a) => ({ d, l, a }))));
     download(`dispensing-register-${from}-to-${to}.csv`, M.toCsv(flat, [
       { label: 'S/No', get: (r) => r.d.serialNo }, { label: 'Date', get: (r) => r.d.date },
-      { label: 'Patient', get: (r) => r.d.patientName }, { label: 'Patient ID / File no', get: (r) => r.d.patientId },
+      { label: 'Patient ID / File no', get: (r) => r.d.patientId || r.d.patientName },
       { label: 'Item', get: (r) => M.itemLabel(im.get(r.l.itemId)) }, { label: 'Batch', get: (r) => r.a.batchNo },
       { label: 'Expiry', get: (r) => r.a.expiry }, { label: 'Qty', get: (r) => r.a.qty }, { label: 'Dosage', get: (r) => r.l.dosage },
       { label: 'Dispensed by', get: (r) => r.d.dispensedBy },
@@ -650,8 +649,7 @@ function vDoc({ parts }) {
       <div class="doc-head"><div><h1>Dispensing record</h1><div>${esc(S.settings.facility)}</div></div>
         <div style="text-align:right"><b>${esc(d.serialNo)}</b><br>${esc(d.date)}</div></div>
       <dl class="kv">
-        <dt>Patient</dt><dd><b>${esc(d.patientName)}</b></dd>
-        <dt>ID / File no</dt><dd>${esc(d.patientId || '—')}</dd>
+        <dt>Patient ID / File no</dt><dd><b>${esc(d.patientId || d.patientName)}</b></dd>
       </dl>
       <h2>Items</h2>
       ${table(['Item', ['Qty', 'num'], 'Directions', 'Batch (expiry)'], d.lines.map((l) => `<tr>

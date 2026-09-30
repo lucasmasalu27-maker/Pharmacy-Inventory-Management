@@ -1,6 +1,6 @@
 // Offline support: the app shell is cached so the app opens with no network.
 // Network-first, so an updated app is picked up whenever the server is reachable.
-const CACHE = 'pharmacy-ledger-v3';
+const CACHE = 'pharmacy-ledger-v4';
 const SHELL = [
   './', './index.html', './css/app.css', './js/app.js', './js/model.js', './js/db.js',
   './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png',
